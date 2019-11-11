@@ -23,7 +23,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
-*/
+ */
 
 const express = require("express");
 const path = require("path");
@@ -32,33 +32,34 @@ const bodyParser = require("body-parser");
 const fileSystem = require("fs");
 const formidable = require("formidable");
 const syncRequest = require("sync-request");
-const jwt = require('jsonwebtoken');
-const config = require('config');
-const configServer = config.get('server');
+const jwt = require("jsonwebtoken");
+const config = require("config");
+const configServer = config.get("server");
 const mime = require("mime");
 const docManager = require("./helpers/docManager");
 const documentService = require("./helpers/documentService");
 const fileUtility = require("./helpers/fileUtility");
-const siteUrl = configServer.get('siteUrl');
-const fileChoiceUrl = configServer.has('fileChoiceUrl') ? configServer.get('fileChoiceUrl') : "";
-const plugins = config.get('plugins');
-const cfgSignatureEnable = configServer.get('token.enable');
-const cfgSignatureUseForRequest = configServer.get('token.useforrequest');
-const cfgSignatureSecretExpiresIn = configServer.get('token.expiresIn');
-const cfgSignatureSecret = configServer.get('token.secret');
+const siteUrl = configServer.get("siteUrl");
+const fileChoiceUrl = configServer.has("fileChoiceUrl")
+    ? configServer.get("fileChoiceUrl")
+    : "";
+const plugins = config.get("plugins");
+const cfgSignatureEnable = configServer.get("token.enable");
+const cfgSignatureUseForRequest = configServer.get("token.useforrequest");
+const cfgSignatureSecretExpiresIn = configServer.get("token.expiresIn");
+const cfgSignatureSecret = configServer.get("token.secret");
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-
-String.prototype.hashCode = function () {
-	const len = this.length;
-	let ret = 0;
+String.prototype.hashCode = function() {
+    const len = this.length;
+    let ret = 0;
     for (let i = 0; i < len; i++) {
         ret = (31 * ret + this.charCodeAt(i)) << 0;
     }
     return ret;
 };
-String.prototype.format = function () {
+String.prototype.format = function() {
     let text = this.toString();
 
     if (!arguments.length) return text;
@@ -70,47 +71,78 @@ String.prototype.format = function () {
     return text;
 };
 
-
 const app = express();
 app.set("views", path.join(__dirname, "views"));
 app.set("view engine", "ejs");
 
-
-app.use(function (req, res, next) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+app.use(function(req, res, next) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
     next();
 });
 
 app.use(express.static(path.join(__dirname, "public")));
-if (config.has('server.static')) {
-  const staticContent = config.get('server.static');
-  for (let i = 0; i < staticContent.length; ++i) {
-    const staticContentElem = staticContent[i];
-    app.use(staticContentElem['name'], express.static(staticContentElem['path'], staticContentElem['options']));
-  }
+if (config.has("server.static")) {
+    const staticContent = config.get("server.static");
+    for (let i = 0; i < staticContent.length; ++i) {
+        const staticContentElem = staticContent[i];
+        app.use(
+            staticContentElem["name"],
+            express.static(
+                staticContentElem["path"],
+                staticContentElem["options"]
+            )
+        );
+    }
 }
 app.use(favicon(__dirname + "/public/images/favicon.ico"));
-
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
+app.options("/*", (req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header(
+        "Access-Control-Allow-Headers",
+        "Origin, X-Requested-With, Content-Type, Accept"
+    );
+    res.header("Access-Control-Allow-Methods", "POST, PUT, DELETE");
+    res.status(200);
+    res.send();
+});
 
-app.get("/", function (req, res) {
+app.get("/", function(req, res) {
     try {
-
         docManager.init(__dirname, req, res);
 
         res.render("index", {
-            preloaderUrl: siteUrl + configServer.get('preloaderUrl'),
-            convertExts: configServer.get('convertedDocs').join(","),
-            editedExts: configServer.get('editedDocs').join(","),
+            preloaderUrl: siteUrl + configServer.get("preloaderUrl"),
+            convertExts: configServer.get("convertedDocs").join(","),
+            editedExts: configServer.get("editedDocs").join(","),
             storedFiles: docManager.getStoredFiles(),
             params: docManager.getCustomParams()
         });
-
+    } catch (ex) {
+        console.log(ex);
+        res.status(500);
+        res.render("error", { message: "Server error" });
+        return;
     }
-    catch (ex) {
+});
+
+app.get("/api/", function(req, res) {
+    try {
+        docManager.init(__dirname, req, res);
+
+        res.send(
+            JSON.stringify({
+                preloaderUrl: siteUrl + configServer.get("preloaderUrl"),
+                convertExts: configServer.get("convertedDocs").join(","),
+                editedExts: configServer.get("editedDocs").join(","),
+                storedFiles: docManager.getStoredFiles(),
+                params: docManager.getCustomParams()
+            })
+        );
+    } catch (ex) {
         console.log(ex);
         res.status(500);
         res.render("error", { message: "Server error" });
@@ -132,20 +164,27 @@ app.get("/download", function(req, res) {
     res.setHeader("Content-Length", fileSystem.statSync(path).size);
     res.setHeader("Content-Type", mime.lookup(path));
 
-    res.setHeader("Content-Disposition", "attachment; filename*=UTF-8\'\'" + encodeURIComponent(fileName));
+    res.setHeader(
+        "Content-Disposition",
+        "attachment; filename*=UTF-8''" + encodeURIComponent(fileName)
+    );
 
     var filestream = fileSystem.createReadStream(path);
     filestream.pipe(res);
 });
 
-app.post("/upload", function (req, res) {
-
+app.post("/upload", function(req, res) {
+    console.log("\n\nreq is", req);
     docManager.init(__dirname, req, res);
     docManager.storagePath(""); //mkdir if not exist
 
     const userIp = docManager.curUserHostAddress();
-    const uploadDir = path.join("./public", configServer.get('storageFolder'), userIp);
-    const uploadDirTmp = path.join(uploadDir, 'tmp');
+    const uploadDir = path.join(
+        "./public",
+        configServer.get("storageFolder"),
+        userIp
+    );
+    const uploadDirTmp = path.join(uploadDir, "tmp");
     docManager.createDirectory(uploadDirTmp);
 
     const form = new formidable.IncomingForm();
@@ -153,52 +192,58 @@ app.post("/upload", function (req, res) {
     form.keepExtensions = true;
     form.maxFileSize = configServer.get("maxFileSize");
 
-    form.parse(req, function (err, fields, files) {
-    	if (err) {
-			docManager.cleanFolderRecursive(uploadDirTmp, true);
-			res.writeHead(200, { "Content-Type": "text/plain" });
-			res.write("{ \"error\": \"" + err.message + "\"}");
-			res.end();
-			return;
-		}
+    form.parse(req, function(err, fields, files) {
+        if (err) {
+            docManager.cleanFolderRecursive(uploadDirTmp, true);
+            res.writeHead(200, { "Content-Type": "text/plain" });
+            res.write('{ "error": "' + err.message + '"}');
+            res.end();
+            return;
+        }
 
         const file = files.uploadedFile;
 
         if (file == undefined) {
             res.writeHead(200, { "Content-Type": "text/plain" });
-            res.write("{ \"error\": \"Uploaded file not found\"}");
+            res.write('{ "error": "Uploaded file not found"}');
             res.end();
             return;
         }
 
         file.name = docManager.getCorrectName(file.name);
 
-        if (configServer.get('maxFileSize') < file.size || file.size <= 0) {
-			docManager.cleanFolderRecursive(uploadDirTmp, true);
+        if (configServer.get("maxFileSize") < file.size || file.size <= 0) {
+            docManager.cleanFolderRecursive(uploadDirTmp, true);
             res.writeHead(200, { "Content-Type": "text/plain" });
-            res.write("{ \"error\": \"File size is incorrect\"}");
+            res.write('{ "error": "File size is incorrect"}');
             res.end();
             return;
         }
 
-        const exts = [].concat(configServer.get('viewedDocs'), configServer.get('editedDocs'), configServer.get('convertedDocs'));
+        const exts = [].concat(
+            configServer.get("viewedDocs"),
+            configServer.get("editedDocs"),
+            configServer.get("convertedDocs")
+        );
         const curExt = fileUtility.getFileExtension(file.name);
 
         if (exts.indexOf(curExt) == -1) {
-			docManager.cleanFolderRecursive(uploadDirTmp, true);
+            docManager.cleanFolderRecursive(uploadDirTmp, true);
             res.writeHead(200, { "Content-Type": "text/plain" });
-            res.write("{ \"error\": \"File type is not supported\"}");
+            res.write('{ "error": "File type is not supported"}');
             res.end();
             return;
         }
 
-        fileSystem.rename(file.path, uploadDir + "/" + file.name, function (err) {
-			docManager.cleanFolderRecursive(uploadDirTmp, true);
+        fileSystem.rename(file.path, uploadDir + "/" + file.name, function(
+            err
+        ) {
+            docManager.cleanFolderRecursive(uploadDirTmp, true);
             res.writeHead(200, { "Content-Type": "text/plain" });
             if (err) {
-                res.write("{ \"error\": \"" + err + "\"}");
+                res.write('{ "error": "' + err + '"}');
             } else {
-                res.write("{ \"filename\": \"" + file.name + "\"}");
+                res.write('{ "filename": "' + file.name + '"}');
 
                 const userid = req.query.userid ? req.query.userid : "uid-1";
                 const name = req.query.name ? req.query.name : "Jonn Smith";
@@ -210,8 +255,7 @@ app.post("/upload", function (req, res) {
     });
 });
 
-app.get("/convert", function (req, res) {
-
+app.get("/convert", function(req, res) {
     var fileName = fileUtility.getFileName(req.query.filename);
     var fileUri = docManager.getFileUri(fileName);
     var fileExt = fileUtility.getFileExtension(fileName);
@@ -219,26 +263,26 @@ app.get("/convert", function (req, res) {
     var internalFileExt = docManager.getInternalExtension(fileType);
     var response = res;
 
-    var writeResult = function (filename, step, error) {
+    var writeResult = function(filename, step, error) {
         var result = {};
 
-        if (filename != null)
-            result["filename"] = filename;
+        if (filename != null) result["filename"] = filename;
 
-        if (step != null)
-            result["step"] = step;
+        if (step != null) result["step"] = step;
 
-        if (error != null)
-            result["error"] = error;
+        if (error != null) result["error"] = error;
 
         response.setHeader("Content-Type", "application/json");
         response.write(JSON.stringify(result));
         response.end();
     };
 
-    var callback = function (err, data) {
+    var callback = function(err, data) {
         if (err) {
-            if (err.name === "ConnectionTimeoutError" || err.name === "ResponseTimeoutError") {
+            if (
+                err.name === "ConnectionTimeoutError" ||
+                err.name === "ResponseTimeoutError"
+            ) {
                 writeResult(fileName, 0, null);
             } else {
                 writeResult(null, null, JSON.stringify(err));
@@ -256,20 +300,36 @@ app.get("/convert", function (req, res) {
                 return;
             }
 
-            var correctName = docManager.getCorrectName(fileUtility.getFileName(fileName, true) + internalFileExt);
+            var correctName = docManager.getCorrectName(
+                fileUtility.getFileName(fileName, true) + internalFileExt
+            );
 
             var file = syncRequest("GET", newFileUri);
-            fileSystem.writeFileSync(docManager.storagePath(correctName), file.getBody());
+            fileSystem.writeFileSync(
+                docManager.storagePath(correctName),
+                file.getBody()
+            );
 
             fileSystem.unlinkSync(docManager.storagePath(fileName));
 
             var userAddress = docManager.curUserHostAddress();
-            var historyPath = docManager.historyPath(fileName, userAddress, true);
-            var correctHistoryPath = docManager.historyPath(correctName, userAddress, true);
+            var historyPath = docManager.historyPath(
+                fileName,
+                userAddress,
+                true
+            );
+            var correctHistoryPath = docManager.historyPath(
+                correctName,
+                userAddress,
+                true
+            );
 
             fileSystem.renameSync(historyPath, correctHistoryPath);
 
-            fileSystem.renameSync(path.join(correctHistoryPath, fileName + ".txt"), path.join(correctHistoryPath, correctName + ".txt"));
+            fileSystem.renameSync(
+                path.join(correctHistoryPath, fileName + ".txt"),
+                path.join(correctHistoryPath, correctName + ".txt")
+            );
 
             writeResult(correctName, result, null);
         } catch (e) {
@@ -279,13 +339,20 @@ app.get("/convert", function (req, res) {
     };
 
     try {
-        if (configServer.get('convertedDocs').indexOf(fileExt) != -1) {
+        if (configServer.get("convertedDocs").indexOf(fileExt) != -1) {
             let storagePath = docManager.storagePath(fileName);
             const stat = fileSystem.statSync(storagePath);
             let key = fileUri + stat.mtime.getTime();
 
             key = documentService.generateRevisionId(key);
-            documentService.getConvertedUri(fileUri, fileExt, internalFileExt, key, true, callback);
+            documentService.getConvertedUri(
+                fileUri,
+                fileExt,
+                internalFileExt,
+                key,
+                true,
+                callback
+            );
         } else {
             writeResult(fileName, null, null);
         }
@@ -295,24 +362,28 @@ app.get("/convert", function (req, res) {
     }
 });
 
-app.delete("/file", function (req, res) {
+app.delete("/file", function(req, res) {
     try {
-    	docManager.init(__dirname, req, res);
+        docManager.init(__dirname, req, res);
         let fileName = req.query.filename;
         if (fileName) {
-			fileName = fileUtility.getFileName(fileName);
+            fileName = fileUtility.getFileName(fileName);
 
-			const filePath = docManager.storagePath(fileName);
-			fileSystem.unlinkSync(filePath);
+            const filePath = docManager.storagePath(fileName);
+            fileSystem.unlinkSync(filePath);
 
-			const userAddress = docManager.curUserHostAddress();
-			const historyPath = docManager.historyPath(fileName, userAddress, true);
-			docManager.cleanFolderRecursive(historyPath, true);
-		} else {
-			docManager.cleanFolderRecursive(docManager.storagePath(''), false);
-		}
+            const userAddress = docManager.curUserHostAddress();
+            const historyPath = docManager.historyPath(
+                fileName,
+                userAddress,
+                true
+            );
+            docManager.cleanFolderRecursive(historyPath, true);
+        } else {
+            docManager.cleanFolderRecursive(docManager.storagePath(""), false);
+        }
 
-        res.write("{\"success\":true}");
+        res.write('{"success":true}');
     } catch (ex) {
         console.log(ex);
         res.write("Server error");
@@ -320,17 +391,21 @@ app.delete("/file", function (req, res) {
     res.end();
 });
 
-app.post("/track", function (req, res) {
-
+app.post("/track", function(req, res) {
     docManager.init(__dirname, req, res);
 
     var userAddress = req.query.useraddress;
     var fileName = fileUtility.getFileName(req.query.filename);
     var version = 0;
 
-    var processTrack = function (response, body, fileName, userAddress) {
-
-        var processSave = function (downloadUri, body, fileName, userAddress, resp) {
+    var processTrack = function(response, body, fileName, userAddress) {
+        var processSave = function(
+            downloadUri,
+            body,
+            fileName,
+            userAddress,
+            resp
+        ) {
             var curExt = fileUtility.getFileExtension(fileName);
             var downloadExt = fileUtility.getFileExtension(downloadUri);
 
@@ -338,55 +413,110 @@ app.post("/track", function (req, res) {
                 var key = documentService.generateRevisionId(downloadUri);
 
                 try {
-                    documentService.getConvertedUriSync(downloadUri, downloadExt, curExt, key, function (dUri) {
-                        processSave(dUri, body, fileName, userAddress, resp)
-                    });
+                    documentService.getConvertedUriSync(
+                        downloadUri,
+                        downloadExt,
+                        curExt,
+                        key,
+                        function(dUri) {
+                            processSave(
+                                dUri,
+                                body,
+                                fileName,
+                                userAddress,
+                                resp
+                            );
+                        }
+                    );
                     return;
                 } catch (ex) {
                     console.log(ex);
-                    fileName = docManager.getCorrectName(fileUtility.getFileName(fileName, true) + downloadExt, userAddress)
+                    fileName = docManager.getCorrectName(
+                        fileUtility.getFileName(fileName, true) + downloadExt,
+                        userAddress
+                    );
                 }
             }
 
             try {
-
                 var path = docManager.storagePath(fileName, userAddress);
 
                 if (docManager.existsSync(path)) {
-                    var historyPath = docManager.historyPath(fileName, userAddress);
+                    var historyPath = docManager.historyPath(
+                        fileName,
+                        userAddress
+                    );
                     if (historyPath == "") {
-                        historyPath = docManager.historyPath(fileName, userAddress, true);
+                        historyPath = docManager.historyPath(
+                            fileName,
+                            userAddress,
+                            true
+                        );
                         docManager.createDirectory(historyPath);
                     }
 
                     var count_version = docManager.countVersion(historyPath);
                     version = count_version + 1;
-                    var versionPath = docManager.versionPath(fileName, userAddress, version);
+                    var versionPath = docManager.versionPath(
+                        fileName,
+                        userAddress,
+                        version
+                    );
                     docManager.createDirectory(versionPath);
 
                     var downloadZip = body.changesurl;
                     if (downloadZip) {
-                        var path_changes = docManager.diffPath(fileName, userAddress, version);
+                        var path_changes = docManager.diffPath(
+                            fileName,
+                            userAddress,
+                            version
+                        );
                         var diffZip = syncRequest("GET", downloadZip);
-                        fileSystem.writeFileSync(path_changes, diffZip.getBody());
+                        fileSystem.writeFileSync(
+                            path_changes,
+                            diffZip.getBody()
+                        );
                     }
 
-                    var changeshistory = body.changeshistory || JSON.stringify(body.history);
+                    var changeshistory =
+                        body.changeshistory || JSON.stringify(body.history);
                     if (changeshistory) {
-                        var path_changes_json = docManager.changesPath(fileName, userAddress, version);
-                        fileSystem.writeFileSync(path_changes_json, changeshistory);
+                        var path_changes_json = docManager.changesPath(
+                            fileName,
+                            userAddress,
+                            version
+                        );
+                        fileSystem.writeFileSync(
+                            path_changes_json,
+                            changeshistory
+                        );
                     }
 
-                    var path_key = docManager.keyPath(fileName, userAddress, version);
+                    var path_key = docManager.keyPath(
+                        fileName,
+                        userAddress,
+                        version
+                    );
                     fileSystem.writeFileSync(path_key, body.key);
 
-                    var path_prev = docManager.prevFilePath(fileName, userAddress, version);
-                    fileSystem.writeFileSync(path_prev, fileSystem.readFileSync(path));
+                    var path_prev = docManager.prevFilePath(
+                        fileName,
+                        userAddress,
+                        version
+                    );
+                    fileSystem.writeFileSync(
+                        path_prev,
+                        fileSystem.readFileSync(path)
+                    );
 
                     var file = syncRequest("GET", downloadUri);
                     fileSystem.writeFileSync(path, file.getBody());
 
-                    var forcesavePath = docManager.forcesavePath(fileName, userAddress, false);
+                    var forcesavePath = docManager.forcesavePath(
+                        fileName,
+                        userAddress,
+                        false
+                    );
                     if (forcesavePath != "") {
                         fileSystem.unlinkSync(forcesavePath);
                     }
@@ -395,11 +525,17 @@ app.post("/track", function (req, res) {
                 console.log(ex);
             }
 
-            response.write("{\"error\":0}");
+            response.write('{"error":0}');
             response.end();
         };
 
-        var processForceSave = function (downloadUri, body, fileName, userAddress, resp) {
+        var processForceSave = function(
+            downloadUri,
+            body,
+            fileName,
+            userAddress,
+            resp
+        ) {
             var curExt = fileUtility.getFileExtension(fileName);
             var downloadExt = fileUtility.getFileExtension(downloadUri);
 
@@ -407,23 +543,45 @@ app.post("/track", function (req, res) {
                 var key = documentService.generateRevisionId(downloadUri);
 
                 try {
-                    documentService.getConvertedUriSync(downloadUri, downloadExt, curExt, key, function (dUri) {
-                        processForceSave(dUri, body, fileName, userAddress, resp)
-                    });
+                    documentService.getConvertedUriSync(
+                        downloadUri,
+                        downloadExt,
+                        curExt,
+                        key,
+                        function(dUri) {
+                            processForceSave(
+                                dUri,
+                                body,
+                                fileName,
+                                userAddress,
+                                resp
+                            );
+                        }
+                    );
                     return;
                 } catch (ex) {
                     console.log(ex);
-                    fileName = docManager.getCorrectName(fileUtility.getFileName(fileName, true) + downloadExt, userAddress)
+                    fileName = docManager.getCorrectName(
+                        fileUtility.getFileName(fileName, true) + downloadExt,
+                        userAddress
+                    );
                 }
             }
 
             try {
-
                 var path = docManager.storagePath(fileName, userAddress);
 
-                var forcesavePath = docManager.forcesavePath(fileName, userAddress, false);
+                var forcesavePath = docManager.forcesavePath(
+                    fileName,
+                    userAddress,
+                    false
+                );
                 if (forcesavePath == "") {
-                    forcesavePath = docManager.forcesavePath(fileName, userAddress, true);
+                    forcesavePath = docManager.forcesavePath(
+                        fileName,
+                        userAddress,
+                        true
+                    );
                 }
 
                 var file = syncRequest("GET", downloadUri);
@@ -432,12 +590,14 @@ app.post("/track", function (req, res) {
                 console.log(ex);
             }
 
-            response.write("{\"error\":0}");
+            response.write('{"error":0}');
             response.end();
         };
 
-        if (body.status == 1) { //Editing
-            if (body.actions && body.actions[0].type == 0) { //finished edit
+        if (body.status == 1) {
+            //Editing
+            if (body.actions && body.actions[0].type == 0) {
+                //finished edit
                 var user = body.actions[0].userid;
                 if (body.users.indexOf(user) == -1) {
                     var key = body.key;
@@ -448,25 +608,26 @@ app.post("/track", function (req, res) {
                     }
                 }
             }
-
-        } else if (body.status == 2 || body.status == 3) { //MustSave, Corrupted
+        } else if (body.status == 2 || body.status == 3) {
+            //MustSave, Corrupted
             processSave(body.url, body, fileName, userAddress, response);
             return;
-        } else if (body.status == 6 || body.status == 7) { //MustForceSave, CorruptedForceSave
+        } else if (body.status == 6 || body.status == 7) {
+            //MustForceSave, CorruptedForceSave
             processForceSave(body.url, body, fileName, userAddress, response);
             return;
         }
 
-        response.write("{\"error\":0}");
+        response.write('{"error":0}');
         response.end();
     };
 
-    var readbody = function (request, response, fileName, userAddress) {
+    var readbody = function(request, response, fileName, userAddress) {
         var content = "";
-        request.on('data', function (data) {
+        request.on("data", function(data) {
             content += data;
         });
-        request.on('end', function () {
+        request.on("end", function() {
             var body = JSON.parse(content);
             processTrack(response, body, fileName, userAddress);
         });
@@ -489,13 +650,15 @@ app.post("/track", function (req, res) {
                         userAddress = checkJwtHeaderRes.query.useraddress;
                     }
                     if (checkJwtHeaderRes.query.filename) {
-                        fileName = fileUtility.getFileName(checkJwtHeaderRes.query.filename);
+                        fileName = fileUtility.getFileName(
+                            checkJwtHeaderRes.query.filename
+                        );
                     }
                 }
             }
         }
         if (body == null) {
-            res.write("{\"error\":1}");
+            res.write('{"error":1}');
             res.end();
             return;
         }
@@ -510,9 +673,29 @@ app.post("/track", function (req, res) {
     }
 });
 
-app.get("/editor", function (req, res) {
+app.get("/editor", function(req, res) {
     try {
-
+        const { org, site } = req.query;
+        console.log("\n\nreq.query is", req.query);
+        console.log("\n\nreq.params is", req.params);
+        // Create org folder if it doesn't exist
+        if (req.query.org) {
+            docManager.createDirectory(
+                path.join(__dirname, "public", "files", req.query.org)
+            );
+        }
+        // Create site folder if it doesn't exist
+        if (req.query.site) {
+            docManager.createDirectory(
+                path.join(
+                    __dirname,
+                    "public",
+                    "files",
+                    req.query.org,
+                    req.query.site
+                )
+            );
+        }
         docManager.init(__dirname, req, res);
 
         var fileExt = req.query.fileExt;
@@ -523,18 +706,34 @@ app.get("/editor", function (req, res) {
         var name = req.query.name ? req.query.name : "Jonn Smith";
 
         if (fileExt != null) {
-            var fileName = docManager.createDemo((req.query.sample ? "sample." : "new.") + fileExt, userid, name);
+            var fileName = docManager.createDemo(
+                (req.query.sample ? "sample." : "new.") + fileExt,
+                userid,
+                name,
+                {
+                    org,
+                    site
+                }
+            );
 
-            var redirectPath = docManager.getServerUrl() + "/editor?fileName=" + encodeURIComponent(fileName) + docManager.getCustomParams();
+            var redirectPath =
+                docManager.getServerUrl() +
+                "/editor?fileName=" +
+                encodeURIComponent(fileName) +
+                docManager.getCustomParams();
             res.redirect(redirectPath);
             return;
         }
 
         var userAddress = docManager.curUserHostAddress();
         var fileName = fileUtility.getFileName(req.query.fileName);
-        if (!docManager.existsSync(docManager.storagePath(fileName, userAddress))) {
-            throw { 
-                "message": "File not found: " + fileName
+        if (
+            !docManager.existsSync(
+                docManager.storagePath(fileName, userAddress)
+            )
+        ) {
+            throw {
+                message: "File not found: " + fileName
             };
         }
         var key = docManager.getKey(fileName);
@@ -542,10 +741,17 @@ app.get("/editor", function (req, res) {
         var mode = req.query.mode || "edit"; //mode: view/edit/review/comment/fillForms/embedded
         var type = req.query.type || ""; //type: embedded/mobile/desktop
         if (type == "") {
-                type = new RegExp(configServer.get("mobileRegEx"), "i").test(req.get('User-Agent')) ? "mobile" : "desktop";
-            }
+            type = new RegExp(configServer.get("mobileRegEx"), "i").test(
+                req.get("User-Agent")
+            )
+                ? "mobile"
+                : "desktop";
+        }
 
-        var canEdit = configServer.get('editedDocs').indexOf(fileUtility.getFileExtension(fileName)) != -1;
+        var canEdit =
+            configServer
+                .get("editedDocs")
+                .indexOf(fileUtility.getFileExtension(fileName)) != -1;
 
         var countVersion = 1;
 
@@ -553,8 +759,7 @@ app.get("/editor", function (req, res) {
         var changes = null;
         var keyVersion = key;
 
-        if (historyPath != '') {
-
+        if (historyPath != "") {
             countVersion = docManager.countVersion(historyPath) + 1;
             for (var i = 1; i <= countVersion; i++) {
                 if (i < countVersion) {
@@ -563,31 +768,56 @@ app.get("/editor", function (req, res) {
                 } else {
                     keyVersion = key;
                 }
-                history.push(docManager.getHistory(fileName, changes, keyVersion, i));
+                history.push(
+                    docManager.getHistory(fileName, changes, keyVersion, i)
+                );
 
                 var historyD = {
                     version: i,
                     key: keyVersion,
-                    url: i == countVersion ? url : (docManager.getlocalFileUri(fileName, i, true) + "/prev" + fileUtility.getFileExtension(fileName)),
+                    url:
+                        i == countVersion
+                            ? url
+                            : docManager.getlocalFileUri(fileName, i, true) +
+                              "/prev" +
+                              fileUtility.getFileExtension(fileName)
                 };
 
-                if (i > 1 && docManager.existsSync(docManager.diffPath(fileName, userAddress, i-1))) {
+                if (
+                    i > 1 &&
+                    docManager.existsSync(
+                        docManager.diffPath(fileName, userAddress, i - 1)
+                    )
+                ) {
                     historyD.previous = {
-                        key: historyData[i-2].key,
-                        url: historyData[i-2].url,
+                        key: historyData[i - 2].key,
+                        url: historyData[i - 2].url
                     };
-                    historyD.changesUrl = docManager.getlocalFileUri(fileName, i-1) + "/diff.zip";
+                    historyD.changesUrl =
+                        docManager.getlocalFileUri(fileName, i - 1) +
+                        "/diff.zip";
                 }
 
                 historyData.push(historyD);
-                
+
                 if (i < countVersion) {
-                    var changesFile = docManager.changesPath(fileName, userAddress, i);
+                    var changesFile = docManager.changesPath(
+                        fileName,
+                        userAddress,
+                        i
+                    );
                     changes = docManager.getChanges(changesFile);
                 }
             }
         } else {
-            history.push(docManager.getHistory(fileName, changes, keyVersion, countVersion));
+            history.push(
+                docManager.getHistory(
+                    fileName,
+                    changes,
+                    keyVersion,
+                    countVersion
+                )
+            );
             historyData.push({
                 version: countVersion,
                 key: key,
@@ -597,12 +827,16 @@ app.get("/editor", function (req, res) {
 
         if (cfgSignatureEnable) {
             for (var i = 0; i < historyData.length; i++) {
-                historyData[i].token = jwt.sign(historyData[i], cfgSignatureSecret, {expiresIn: cfgSignatureSecretExpiresIn});
+                historyData[i].token = jwt.sign(
+                    historyData[i],
+                    cfgSignatureSecret,
+                    { expiresIn: cfgSignatureSecretExpiresIn }
+                );
             }
         }
 
         var argss = {
-            apiUrl: siteUrl + configServer.get('apiUrl'),
+            apiUrl: siteUrl + configServer.get("apiUrl"),
             file: {
                 name: fileName,
                 ext: fileUtility.getFileExtension(fileName, true),
@@ -616,10 +850,22 @@ app.get("/editor", function (req, res) {
                 key: key,
                 token: "",
                 callbackUrl: docManager.getCallback(fileName),
-                isEdit: canEdit && (mode == "edit" || mode == "filter" || mode == "blockcontent"),
+                isEdit:
+                    canEdit &&
+                    (mode == "edit" ||
+                        mode == "filter" ||
+                        mode == "blockcontent"),
                 review: mode == "edit" || mode == "review",
-                comment: mode != "view" && mode != "fillForms" && mode != "embedded" && mode != "blockcontent",
-                fillForms: mode != "view" && mode != "comment" && mode != "embedded" && mode != "blockcontent",
+                comment:
+                    mode != "view" &&
+                    mode != "fillForms" &&
+                    mode != "embedded" &&
+                    mode != "blockcontent",
+                fillForms:
+                    mode != "view" &&
+                    mode != "comment" &&
+                    mode != "embedded" &&
+                    mode != "blockcontent",
                 modifyFilter: mode != "filter",
                 modifyContentControl: mode != "blockcontent",
                 mode: canEdit && mode != "view" ? "edit" : "view",
@@ -636,33 +882,38 @@ app.get("/editor", function (req, res) {
             historyData: historyData
         };
 
+        console.log("\n\nargss are", argss);
+
         if (cfgSignatureEnable) {
-            app.render('config', argss, function(err, html){
+            app.render("config", argss, function(err, html) {
                 if (err) {
                     console.log(err);
                 } else {
-                    argss.editor.token = jwt.sign(JSON.parse("{"+html+"}"), cfgSignatureSecret, {expiresIn: cfgSignatureSecretExpiresIn});
+                    argss.editor.token = jwt.sign(
+                        JSON.parse("{" + html + "}"),
+                        cfgSignatureSecret,
+                        { expiresIn: cfgSignatureSecretExpiresIn }
+                    );
                 }
                 res.render("editor", argss);
-              });
+            });
         } else {
-              res.render("editor", argss);
+            res.render("editor", argss);
         }
-    }
-    catch (ex) {
+    } catch (ex) {
         console.log(ex);
         res.status(500);
         res.render("error", { message: "Server error" });
     }
 });
 
-app.use(function (req, res, next) {
+app.use(function(req, res, next) {
     const err = new Error("Not Found");
     err.status = 404;
     next(err);
 });
 
-app.use(function (err, req, res, next) {
+app.use(function(err, req, res, next) {
     res.status(err.status || 500);
     res.render("error", {
         message: err.message
